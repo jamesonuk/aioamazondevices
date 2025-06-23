@@ -1,5 +1,22 @@
 # Changelog
 
+## v3.2.0-rc.1 (2025-06-23)
+
+### Features
+
+- Queues api calls to avoid hitting the limit ([`f397d84`](https://github.com/chemelli74/aioamazondevices/commit/f397d846e31b4bd25261caa94ff74be1f61be3d4))
+
+
+### Build system
+
+- Bump pytest from 8.4.0 to 8.4.1 ([`0fbb433`](https://github.com/chemelli74/aioamazondevices/commit/0fbb4335b720b325a6598aa923c70cbafd9fcaeb))
+
+
+### Refactoring
+
+- Update pyproject.toml ([`2545297`](https://github.com/chemelli74/aioamazondevices/commit/254529798e35ffd98947cc0e8e214c9a1c11b323))
+
+
 ## v3.1.14 (2025-06-21)
 
 ### Bug fixes
