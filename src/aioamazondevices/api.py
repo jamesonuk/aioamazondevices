@@ -17,7 +17,6 @@ from urllib.parse import parse_qs, urlencode
 import orjson
 from aiohttp import ClientConnectorError, ClientResponse, ClientSession
 from bs4 import BeautifulSoup, Tag
-from langcodes import Language
 from multidict import CIMultiDictProxy, MultiDictProxy
 from yarl import URL
 
@@ -84,6 +83,7 @@ class AmazonDevice:
     device_cluster_members: list[str]
     online: bool
     serial_number: str
+    locale: str | None
     software_version: str
     do_not_disturb: bool
     response_style: str | None
@@ -125,10 +125,10 @@ class AmazonEchoApi:
         # Force country digits as lower case
         country_code = login_country_code.lower()
 
-        locale = DOMAIN_BY_ISO3166_COUNTRY.get(country_code)
-        domain = locale["domain"] if locale else country_code
+        country_details = DOMAIN_BY_ISO3166_COUNTRY.get(country_code)
+        domain = country_details["domain"] if country_details else country_code
 
-        if locale and (assoc := locale.get("openid.assoc_handle")):
+        if country_details and (assoc := country_details.get("openid.assoc_handle")):
             assoc_handle = assoc
         else:
             assoc_handle = f"{DEFAULT_ASSOC_HANDLE}_{country_code}"
@@ -148,13 +148,11 @@ class AmazonEchoApi:
         self.session: ClientSession
         self._devices: dict[str, Any] = {}
 
-        lang_object = Language.make(territory=self._login_country_code.upper())
-        lang_maximized = lang_object.maximize()
-        self._language = f"{lang_maximized.language}-{lang_maximized.region}"
+        self._language = "en-US"
+
         _LOGGER.debug(
-            "Initialize library with domain <%s> and language <%s>",
+            "Initialize library with domain <%s>",
             self._domain,
-            self._language,
         )
 
     def _load_website_cookies(self) -> dict[str, str]:
@@ -296,7 +294,8 @@ class AmazonEchoApi:
         if not hasattr(self, "session") or self.session.closed:
             _LOGGER.debug("Creating HTTP session (aiohttp)")
             headers = DEFAULT_HEADERS
-            headers.update({"Accept-Language": self._language})
+            if self._language:
+                headers.update({"Accept-Language": self._language})
             self.session = ClientSession(
                 headers=headers,
                 cookies=self._cookies,
@@ -554,16 +553,16 @@ class AmazonEchoApi:
 
         resp_me_json = await resp_me.json()
         market = resp_me_json["marketPlaceDomainName"]
-        language = resp_me_json["marketPlaceLocale"]
+        self._language = resp_me_json["marketPlaceLocale"]
 
         _domain = f"https://www.amazon.{self._domain}"
 
-        if market != _domain or language != self._language:
+        if market != _domain:
             _LOGGER.debug(
                 "Selected country <%s> doesn't matches Amazon account:\n%s\n vs \n%s",
                 self._login_country_code.upper(),
-                {"site  ": _domain, "locale": self._language},
-                {"market": market, "locale": language},
+                {"site  ": _domain},
+                {"market": market},
             )
             raise WrongCountry
 
@@ -836,6 +835,7 @@ class AmazonEchoApi:
                 ),
                 online=devices_node["online"],
                 serial_number=serial_number,
+                locale=preferences_node["locale"] if preferences_node else None,
                 software_version=devices_node["softwareVersion"],
                 do_not_disturb=do_not_disturb_node["enabled"],
                 response_style=(
@@ -907,7 +907,7 @@ class AmazonEchoApi:
         base_payload = {
             "deviceType": device.device_type,
             "deviceSerialNumber": device.serial_number,
-            "locale": self._language,
+            "locale": device.locale,
             "customerId": device.device_owner_customer_id,
         }
 
@@ -942,7 +942,7 @@ class AmazonEchoApi:
                 "expireAfter": "PT5S",
                 "content": [
                     {
-                        "locale": self._language,
+                        "locale": device.locale,
                         "display": {
                             "title": "Home Assistant",
                             "body": message_body,

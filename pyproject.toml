@@ -23,7 +23,6 @@ dependencies = [
 "aiohttp",
 "beautifulsoup4",
 "colorlog",
-"langcodes",
 "orjson",
 "yarl",
 ]
