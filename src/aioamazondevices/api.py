@@ -56,7 +56,6 @@ from .exceptions import (
     CannotConnect,
     CannotRegisterDevice,
     CannotRetrieveData,
-    WrongCountry,
     WrongMethod,
 )
 from .utils import obfuscate_email, scrub_fields
@@ -148,8 +147,6 @@ class AmazonEchoApi:
         self.session: ClientSession
         self._devices: dict[str, Any] = {}
 
-        self._language = "en-US"
-
         _LOGGER.debug(
             "Initialize library with domain <%s>",
             self._domain,
@@ -168,7 +165,6 @@ class AmazonEchoApi:
                 ]
             }
         )
-        website_cookies.update({"lc-acbit": self._language})
 
         return website_cookies
 
@@ -239,7 +235,6 @@ class AmazonEchoApi:
             "openid.mode": "checkid_setup",
             "openid.ns.oa2": "http://www.amazon.com/ap/ext/oauth/2",
             "openid.oa2.client_id": f"device:{client_id}",
-            "language": self._language.replace("-", "_"),
             "openid.ns.pape": "http://specs.openid.net/extensions/pape/1.0",
             "openid.oa2.code_challenge": code_challenge,
             "openid.oa2.scope": "device_auth_access",
@@ -294,8 +289,6 @@ class AmazonEchoApi:
         if not hasattr(self, "session") or self.session.closed:
             _LOGGER.debug("Creating HTTP session (aiohttp)")
             headers = DEFAULT_HEADERS
-            if self._language:
-                headers.update({"Accept-Language": self._language})
             self.session = ClientSession(
                 headers=headers,
                 cookies=self._cookies,
@@ -347,7 +340,6 @@ class AmazonEchoApi:
         )
 
         headers = DEFAULT_HEADERS
-        headers.update({"Accept-Language": self._language})
         if not amazon_user_agent:
             _LOGGER.debug("Changing User-Agent to %s", DEFAULT_AGENT)
             headers.update({"User-Agent": DEFAULT_AGENT})
@@ -543,8 +535,8 @@ class AmazonEchoApi:
         await self._save_to_file(login_data, "login_data", JSON_EXTENSION)
         return login_data
 
-    async def _check_country(self) -> None:
-        """Check if user selected country matches Amazon account country."""
+    async def _check_domain(self) -> None:
+        """Check if user selected domain matches Amazon account country."""
         url = f"https://alexa.amazon.{self._domain}/api/users/me"
         _, resp_me = await self._session_request(HTTPMethod.GET, url)
 
@@ -553,20 +545,16 @@ class AmazonEchoApi:
 
         resp_me_json = await resp_me.json()
         market = resp_me_json["marketPlaceDomainName"]
-        self._language = resp_me_json["marketPlaceLocale"]
 
         _domain = f"https://www.amazon.{self._domain}"
 
         if market != _domain:
-            _LOGGER.debug(
-                "Selected country <%s> doesn't matches Amazon account:\n%s\n vs \n%s",
+            _LOGGER.warning(
+                "Selected country <%s> doesn't matches Amazon account <%s>\n"
+                "This may cause unexpected results",
                 self._login_country_code.upper(),
                 {"site  ": _domain},
-                {"market": market},
             )
-            raise WrongCountry
-
-        _LOGGER.debug("User selected country matches Amazon account one")
 
     async def _get_devices_ids(self) -> list[dict[str, str]]:
         """Retrieve devices entityId and applianceId."""
@@ -743,7 +731,7 @@ class AmazonEchoApi:
 
         _LOGGER.info("Register device: %s", scrub_fields(register_device))
 
-        await self._check_country()
+        await self._check_domain()
 
         return register_device
 
@@ -763,7 +751,7 @@ class AmazonEchoApi:
 
         self._client_session()
 
-        await self._check_country()
+        await self._check_domain()
 
         return self._login_stored_data
 
