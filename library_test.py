@@ -243,8 +243,27 @@ async def main() -> None:
         sys.exit(4)
     print("Session authenticated!")
 
+    print("Volume to 100 on :", device_single.account_name)
+    await api.set_volume(device_single, 100)
+
+    await wait_action_complete(1)
+
     print("Sending message via 'Alexa.Speak' to:", device_single.account_name)
-    await api.call_alexa_speak(device_single, "Test Speak message from new library")
+    await api.call_alexa_speak(
+        device_single, "Test Speak message at 100% from new library"
+    )
+
+    await wait_action_complete()
+
+    print("Volume to 30 on :", device_single.account_name)
+    await api.set_volume(device_single, 30)
+
+    await wait_action_complete(1)
+
+    print("Sending message via 'Alexa.Speak' to:", device_single.account_name)
+    await api.call_alexa_speak(
+        device_single, "Test Speak message at 30% from new library"
+    )
 
     await wait_action_complete()
 
@@ -273,6 +292,11 @@ async def main() -> None:
     await api.call_alexa_music(device_single, music, source)
 
     await wait_action_complete(15)
+
+    print(f"Stopping playback on {device_single.account_name}")
+    await api.stop_playback(device_single)
+
+    await wait_action_complete()
 
     print(f"Text command on {device_single.account_name}")
     await api.call_alexa_text_command(device_single, "Set timer pasta 12 minute")
