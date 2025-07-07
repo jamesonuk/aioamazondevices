@@ -84,6 +84,7 @@ class AmazonDevice:
     device_type: str
     device_owner_customer_id: str
     device_cluster_members: list[str]
+    device_locale: str
     online: bool
     serial_number: str
     software_version: str
@@ -338,6 +339,17 @@ class AmazonEchoApi:
             )
         return False
 
+    async def _ignore_phoenix_error(self, response: ClientResponse) -> bool:
+        """Return true if error is due to phoenix endpoint."""
+        if response.status in [HTTP_ERROR_199, HTTP_ERROR_299] and (
+            URI_IDS in response.url.path
+        ):
+            _LOGGER.warning(
+                "Cannot get sensor data from %s endpoint, ignoring", URI_IDS
+            )
+            return True
+        return False
+
     async def _http_phrase_error(self, error: int) -> str:
         """Convert numeric error in human phrase."""
         if error == HTTP_ERROR_199:
@@ -414,7 +426,9 @@ class AmazonEchoApi:
                 HTTPStatus.UNAUTHORIZED,
             ]:
                 raise CannotAuthenticate(await self._http_phrase_error(resp.status))
-            if not await self._ignore_ap_signin_error(resp):
+            if not await self._ignore_ap_signin_error(
+                resp
+            ) and not await self._ignore_phoenix_error(resp):
                 raise CannotRetrieveData(
                     f"Request failed: {await self._http_phrase_error(resp.status)}"
                 )
@@ -574,20 +588,19 @@ class AmazonEchoApi:
 
         resp_me_json = await resp_me.json()
         market = resp_me_json["marketPlaceDomainName"]
-        language = resp_me_json["marketPlaceLocale"]
 
         _domain = f"https://www.amazon.{self._domain}"
 
-        if market != _domain or language != self._language:
-            _LOGGER.debug(
-                "Selected country <%s> doesn't matches Amazon account:\n%s\n vs \n%s",
+        if market != _domain:
+            _LOGGER.warning(
+                "Selected country <%s> doesn't matches Amazon API reply:\n%s\n vs \n%s",
                 self._login_country_code.upper(),
-                {"site  ": _domain, "locale": self._language},
-                {"market": market, "locale": language},
+                {"site  ": _domain},
+                {"market": market},
             )
             raise WrongCountry
 
-        _LOGGER.debug("User selected country matches Amazon account one")
+        _LOGGER.debug("User selected country matches Amazon API one")
 
     async def _get_devices_ids(self) -> list[dict[str, str]]:
         """Retrieve devices entityId and applianceId."""
@@ -596,6 +609,14 @@ class AmazonEchoApi:
             url=f"https://alexa.amazon.{self._domain}{URI_IDS}",
             amazon_user_agent=False,
         )
+
+        # Sensors data not available
+        if raw_resp.status != HTTPStatus.OK:
+            _LOGGER.warning(
+                "Sensors data not available [%s empty reply], skipping", URI_IDS
+            )
+            return []
+
         json_data = await raw_resp.json()
 
         network_detail = orjson.loads(json_data["networkDetail"])
@@ -832,7 +853,7 @@ class AmazonEchoApi:
             if not devices_node or (devices_node.get("deviceType") in DEVICE_TO_IGNORE):
                 continue
 
-            preferences_node = device.get(NODE_PREFERENCES)
+            preferences_node = device.get(NODE_PREFERENCES, {})
             do_not_disturb_node = device[NODE_DO_NOT_DISTURB]
             bluetooth_node = device[NODE_BLUETOOTH]
             identifier_node = device.get(NODE_IDENTIFIER, {})
@@ -854,13 +875,12 @@ class AmazonEchoApi:
                 device_cluster_members=(
                     devices_node["clusterMembers"] or [serial_number]
                 ),
+                device_locale=preferences_node.get("locale", self._language),
                 online=devices_node["online"],
                 serial_number=serial_number,
                 software_version=devices_node["softwareVersion"],
                 do_not_disturb=do_not_disturb_node["enabled"],
-                response_style=(
-                    preferences_node["responseStyle"] if preferences_node else None
-                ),
+                response_style=preferences_node.get("responseStyle"),
                 bluetooth_state=bluetooth_node["online"],
                 entity_id=identifier_node.get("entityId"),
                 appliance_id=identifier_node.get("applianceId"),
@@ -927,7 +947,7 @@ class AmazonEchoApi:
         base_payload = {
             "deviceType": device.device_type,
             "deviceSerialNumber": device.serial_number,
-            "locale": self._language,
+            "locale": device.device_locale,
             "customerId": device.device_owner_customer_id,
         }
 
@@ -962,7 +982,7 @@ class AmazonEchoApi:
                 "expireAfter": "PT5S",
                 "content": [
                     {
-                        "locale": self._language,
+                        "locale": device.device_locale,
                         "display": {
                             "title": "Home Assistant",
                             "body": message_body,
